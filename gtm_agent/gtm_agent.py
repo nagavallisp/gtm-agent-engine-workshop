@@ -34,6 +34,7 @@ from . import data_service
 from .data_service import REP_IDS
 
 MODEL_NAME = "gpt-4o-mini"
+SENSITIVE_PROSPECT_FIELDS = {"billing_qualification"}
 
 # ---------------------------------------------------------------------------
 # Tools
@@ -56,9 +57,10 @@ def build_prospect_profile(prospect_id: str) -> dict:
     rec = data_service.get_prospect_record(prospect_id)
     if rec is None:
         return {"prospect_profile": None, "found": False}
+    safe_rec = {k: v for k, v in rec.items() if k not in SENSITIVE_PROSPECT_FIELDS}
     built = {
         "prospect_id": prospect_id,
-        **rec,
+        **safe_rec,
         "engagement_history": data_service.fetch_engagement_history(prospect_id),
         "account_details": data_service.fetch_account_details(prospect_id),
         "tech_stack": data_service.fetch_tech_stack(prospect_id),
@@ -111,9 +113,14 @@ def score_prospect(prospect_profile: dict, offering: dict | None = None) -> dict
     pid = prospect_profile.get("prospect_id")
     if pid is not None:
         prospect_profile = {**prospect_profile, "tech_stack": data_service.fetch_tech_stack(pid)}
+    fit_fields = (
+        "prospect_id", "name", "account_details", "annual_revenue",
+        "tech_stack", "engagement_history",
+    )
+    fit_profile = {field: prospect_profile[field] for field in fit_fields if field in prospect_profile}
     user = (
         "Offering:\n" + json.dumps(offering, indent=2) +
-        "\n\nProspect profile:\n" + json.dumps(prospect_profile, indent=2)
+        "\n\nProspect profile:\n" + json.dumps(fit_profile, indent=2)
     )
     result = _scoring_llm.invoke([
         {"role": "system", "content": SCORING_PROMPT},
@@ -133,7 +140,8 @@ def get_prospect(prospect_id: str) -> dict:
     contact = {
         "prospect_id": prospect_id,
         **{k: v for k, v in record.items()
-           if k not in ("engagement_history", "account_details", "tech_stack")},
+           if k not in ("engagement_history", "account_details", "tech_stack")
+           and k not in SENSITIVE_PROSPECT_FIELDS},
     }
     return {"prospect": contact, "found": True}
 
